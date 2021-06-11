@@ -52,7 +52,7 @@ if [ -d "$repo_dir" ]; then
   
   # Do we need to sleep a bit to wait for the release to be ready?
   sleep 5
-  data_string='{"tag_name": "v'$full_version_string'", "name": "v'$full_version_string'", "body": "Release v'$full_version_string' of the libCellML library.", "draft": false, "prerelease": $pre_release}'
+  data_string='{"tag_name": "v'$full_version_string'", "name": "v'$full_version_string'", "body": "Release v'$full_version_string' of the libCellML library.", "draft": false, "prerelease": '$pre_release'}'
   echo $data_string
   #git restore CMakeLists.txt
   if [ -d "$token" ]; then
