@@ -284,6 +284,7 @@ def write_out_to_changelog_file(sorted_summaries, tag_end):
             f.write(f'* {title} by `@{summary["user"]} <{summary["user_url"]}>`_ [`#{summary["number"]} <{summary["url"]}>`_].\n')
             contributors.append(summary['avatar_url'])
 
+        contributors = list(set(contributors))
         if contributors:
             section_title = 'Contributors'
             f.write(f'\n{section_title}\n')
