@@ -12,6 +12,7 @@ If targeting
 usage:
  python create_change_log.py v0.1.0 v0.2.0
 """
+import argparse
 import json
 import os
 import requests
@@ -21,10 +22,11 @@ import sys
 from pathlib import Path
 
 DATABASE_FILE = 'pull_request.db'
-FIRST_COMMIT_SHA = 'bdb8aea5cbfda734dc980470b98e861eba6a8a95'
+FIRST_COMMIT_TAG = 'v0.0.0'
 
 pull_request_database = []
 pull_request_cache = {}
+repo_dir = None
 
 
 class CommunicationError(Exception):
@@ -36,7 +38,8 @@ class MissingPullRequestData(Exception):
 
 
 def _sort_pull_request_data(data):
-    return sorted(data, key=lambda k: k['merged_at'] if k['merged_at'] is not None else '0000-00-00T00:00:00Z', reverse=True)
+    return sorted(data, key=lambda k: k['merged_at'] if k['merged_at'] is not None else '0000-00-00T00:00:00Z',
+                  reverse=True)
 
 
 def _sort_summary_data(data):
@@ -55,13 +58,13 @@ def _pull_request_merged_into_main(pull_request):
     return was_merged and merged_into_main
 
 
-def _ask_github_for_pull_request_data(page=1):
+def _ask_github_for_pull_request_data(project, page=1):
     global pull_request_cache
 
     if page in pull_request_cache:
         return pull_request_cache[page]
 
-    r = requests.get('https://api.github.com/repos/cellml/libcellml/pulls',
+    r = requests.get(f'https://api.github.com/repos/{project}/pulls',
                      headers={'Accept': 'application/vnd.github.v3+json'},
                      params={'state': 'closed', 'page': page, 'per_page': 100})
 
@@ -94,9 +97,9 @@ def get_newest_database_entry():
     return pull_request_database[0] if len(pull_request_database) else None
 
 
-def database_up_to_date():
+def database_up_to_date(project):
     # Get the most recent pull request.
-    pull_requests = _ask_github_for_pull_request_data()
+    pull_requests = _ask_github_for_pull_request_data(project)
     newest_pull_request = _get_newest(pull_requests)
     # If the first one isn't in the database then the database isn't up to date.
     newest_database_entry = get_newest_database_entry()
@@ -132,23 +135,23 @@ def add_all_entries_to_database(pull_requests):
     return added_all
 
 
-def update_database():
+def update_database(project):
     # Keep asking for merged pull requests until there are none.
     page = 1
-    pull_requests = _ask_github_for_pull_request_data(page)
+    pull_requests = _ask_github_for_pull_request_data(project, page)
     if not add_all_entries_to_database(pull_requests):
         return
 
     while len(pull_requests) > 0:
         page += 1
-        pull_requests = _ask_github_for_pull_request_data(page)
+        pull_requests = _ask_github_for_pull_request_data(project, page)
         # Add any pull requests not in the database to it.
         if not add_all_entries_to_database(pull_requests):
             return
 
 
-def clone_repository():
-    subprocess.call(['git clone https://github.com/cellml/libcellml.git libcellml'], shell=True)
+def clone_repository(project):
+    subprocess.call(["git", "clone", f"https://github.com/{project}.git", "libcellml"], shell=True)
 
 
 def _parse_tag_output(output):
@@ -163,10 +166,10 @@ def _parse_tag_output(output):
 
 
 def _get_tag_data(tag):
-    cur_dir = os.path.abspath(os.curdir)
+    global repo_dir
 
     pr = subprocess.Popen(f'git tag -v {tag}',
-                          cwd=os.path.join(cur_dir, 'libcellml'),
+                          cwd=repo_dir,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE,
                           shell=True)
@@ -176,10 +179,10 @@ def _get_tag_data(tag):
 
 
 def _get_commit_time(commit_sha):
-    cur_dir = os.path.abspath(os.curdir)
+    global repo_dir
 
     pr = subprocess.Popen(f'TZ=UTC git show --date=iso-local --pretty=tformat:%cd {commit_sha}',
-                          cwd=os.path.join(cur_dir, 'libcellml'),
+                          cwd=repo_dir,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE,
                           shell=True)
@@ -250,55 +253,98 @@ def extract_label(pull_request):
 
 
 def extract_summary(pull_request):
-    return {'title': pull_request['title'], 'label': extract_label(pull_request), 'number': pull_request['number'], 'url': pull_request['html_url']}
+    return {
+        'title': pull_request['title'],
+        'label': extract_label(pull_request),
+        'number': pull_request['number'],
+        'url': pull_request['html_url'],
+        'user': pull_request['user']['login'],
+        'user_url': pull_request['user']['url'],
+        'avatar_url': pull_request['user']['avatar_url'],
+    }
 
 
-def write_out_to_changelog_file(sorted_summaries, tag_start, tag_end):
+def _get_display_name_for_tag(tag):
+    return 'latest' if tag == 'HEAD' else tag
+
+
+def write_out_to_changelog_file(sorted_summaries, tag_end):
     current_label = ''
-    file_name = f'changelog_{tag_start}_{tag_end}.rst'
+    file_name = f'changelog_{_get_display_name_for_tag(tag_end)}.rst'
     with open(file_name, 'w') as f:
+        contributors = []
         for summary in sorted_summaries:
             if current_label != summary['label']:
                 current_label = summary['label']
                 f.write(f'\n{current_label}\n')
-                f.write('-' * len(current_label))
+                f.write('=' * len(current_label))
                 f.write('\n\n')
 
             title = summary['title'][:-1] if summary['title'].endswith('.') else summary['title']
-            f.write(f' * {title} [`#{summary["number"]} {summary["url"]}`_].\n')
+            f.write(f'* {title} by `@{summary["user"]} <{summary["user_url"]}>`_ [`#{summary["number"]} <{summary["url"]}>`_].\n')
+            contributors.append(summary['avatar_url'])
+
+        if contributors:
+            section_title = 'Contributors'
+            f.write(f'\n{section_title}\n')
+            f.write('-' * len(section_title))
+            f.write('\n\n')
+        for contributor in contributors:
+            f.write(f'.. image:: {contributor}\n   :target: {contributor}\n   :height: 24\n   :width: 24\n')
 
     print(f'Changelog written to: {file_name}.')
 
 
+def process_arguments():
+    parser = argparse.ArgumentParser(description="Create a simple change log from merged pull requests from a GitHub "
+                                                 "project.")
+    parser.add_argument("-p", "--project",
+                        help="GitHub project to work with, default 'cellml/libcellml'.", default="cellml/libcellml")
+    parser.add_argument("-r", "--local-repo",
+                        help="The location of the project repository. Absolute path or relative path relative to the "
+                             "current working directory.", default=None)
+    parser.add_argument("tag_start")
+    parser.add_argument("tag_end", nargs='?', default="HEAD")
+
+    return parser
+
+
 def main():
     global pull_request_cache
+    global repo_dir
+
+    repo_dir = None
     pull_request_cache = {}
 
-    args = sys.argv[:]
+    parser = process_arguments()
+    args = parser.parse_args()
 
-    if len(args) > 1:
-        tag_start = args.pop()
-        tag_end = 'HEAD'
-        if len(args) > 1:
-            tag_end = tag_start
-            tag_start = args.pop()
-        if tag_start == '-':
-            tag_start = FIRST_COMMIT_SHA
-    else:
-        sys.exit(1)
+    project = args.project
+    repo_path = args.local_repo
+    tag_start = args.tag_start
+    tag_end = args.tag_end
+    if tag_start == '-':
+        tag_start = FIRST_COMMIT_TAG
 
     load_database()
     # Determine if the database is complete.
-    if not database_up_to_date():
+    if not database_up_to_date(project):
         # Update database if not complete.
-        update_database()
+        update_database(project)
 
-    if not os.path.isfile(os.path.join('libcellml', 'CMakeLists.txt')):
-        clone_repository()
+    cur_dir = os.path.abspath(os.curdir)
+    if repo_path is None:
+        clone_repository(project)
+        repo_dir = os.path.join(cur_dir, 'libcellml')
+    else:
+        repo_dir = repo_path
+
+    if not os.path.isfile(os.path.join(repo_path, 'CMakeLists.txt')):
+        sys.exit(2)
 
     # Check tags, abort on error.
     if not tags_are_valid(tag_start, tag_end):
-        return sys.exit(2)
+        return sys.exit(3)
 
     # Get time from tagged commit.
     start_time = get_time_of_tag(tag_start)
@@ -315,7 +361,7 @@ def main():
     sorted_summaries = _sort_summary_data(pull_request_change_summaries)
 
     # Create a reStructureText file to dump change log into.
-    write_out_to_changelog_file(sorted_summaries, tag_start, tag_end)
+    write_out_to_changelog_file(sorted_summaries, tag_end)
 
 
 if __name__ == "__main__":
