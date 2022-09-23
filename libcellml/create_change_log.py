@@ -279,7 +279,7 @@ def main():
     if len(args) > 1:
         tag_start = args.pop()
         tag_end = 'HEAD'
-        if len(args) > 1:
+        if len(args) > 2:
             tag_end = tag_start
             tag_start = args.pop()
         if tag_start == '-':
