@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 
 import re
@@ -12,7 +11,7 @@ def main():
 
     tot = 0
     for line in lines:
-        a = re.search("^[\d]+: \[==========\] ([\d]+) tests from ([\d]+) test case[s]? ran.*", line)
+        a = re.search(r"^\d+: \[==========\] (\d+) tests from (\d+) test case[s]? ran.*", line)
         if a is not None:
             tot += int(a.group(1))
 
