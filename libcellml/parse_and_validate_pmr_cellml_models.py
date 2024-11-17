@@ -42,13 +42,16 @@ def _do_download_file(url, filename):
     if directory:
         os.makedirs(directory, exist_ok=True)
     with requests.get(url, stream=True) as r:
-        r.raise_for_status()
-        with open(filename, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                # If you have chunk encoded response uncomment if
-                # and set chunk_size parameter to None.
-                # if chunked:
-                f.write(chunk)
+        try:
+            r.raise_for_status()
+            with open(filename, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    # If you have chunk encoded response uncomment if
+                    # and set chunk_size parameter to None.
+                    # if chunked:
+                    f.write(chunk)
+        except requests.exceptions.HTTPError:
+            pass
 
 
 def _download_file(url):
@@ -77,7 +80,8 @@ def _process_arguments():
                         help="JSON listing of CellML files available on PMR.")
     parser.add_argument("parse_validate_exe",
                         help="Parse and validate executable.")
-
+    parser.add_argument("-d", "--do-download", action="store_true", help="Download files from data file.")
+    parser.add_argument("-j", "--just-issues", action="store_true", help="Just report on issues.")
     return parser.parse_args()
 
 
@@ -102,8 +106,7 @@ def main():
         summary = {"model_count": 0}
 
         links = content["collection"]["links"]
-        do_download = False
-        if do_download:
+        if args.do_download:
             for index, link in enumerate(links):
                 fetch_cellml_model(link["href"])
 
@@ -116,8 +119,7 @@ def main():
                 summary[result_string] += 1
 
         index = 0
-        just_issues = False
-        if just_issues:
+        if args.just_issues:
             with open('../just_issues.txt') as f:
                 lines = f.readlines()
 
