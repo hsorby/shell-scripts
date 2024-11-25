@@ -61,8 +61,11 @@ def _download_file(url):
     if os.path.isfile(local_filename):
         dup_local_filename = _get_duplicate_filename(local_filename)
         _do_download_file(url, dup_local_filename)
-        if filecmp.cmp(local_filename, dup_local_filename, shallow=False):
-            os.remove(dup_local_filename)
+        try:
+            if filecmp.cmp(local_filename, dup_local_filename, shallow=False):
+                os.remove(dup_local_filename)
+        except FileNotFoundError:
+            print(f"Trying to compare '{local_filename}' to '{dup_local_filename}' but one of these files wasn't found.")
     else:
         _do_download_file(url, local_filename)
 
